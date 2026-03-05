@@ -48,11 +48,16 @@
             border: 2px dashed var(--border); padding: 40px; text-align: center; border-radius: 12px;
             cursor: pointer; background: var(--bg-color);
         }
-        .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
-        .img-card { background: var(--card-bg); border-radius: 8px; padding: 10px; border: 1px solid var(--border); }
-        .img-card canvas { max-width: 100%; height: auto; border-radius: 4px; display: block; margin-bottom: 10px; }
+        .gallery { display: flex; flex-direction: column; gap: 20px; }
+        .img-card { background: var(--card-bg); border-radius: 8px; padding: 15px; border: 1px solid var(--border); }
+        .img-container { text-align: center; margin-bottom: 15px; background: #eee; border-radius: 4px; padding: 10px; }
+        .img-container img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 0 auto; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        .badge { background: #ff4757; color: white; padding: 4px 8px; border-radius: 12px; font-size: 14px; font-weight: bold; margin-left: 10px; }
+        .badge.success { background: #2ed573; }
+        .raw-text-box { background: var(--bg-color); border: 1px solid var(--border); padding: 10px; border-radius: 4px; font-size: 13px; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 10px; }
         .progress-bar { height: 10px; background: var(--border); border-radius: 5px; overflow: hidden; margin-top: 10px; display: none; }
         .progress-fill { height: 100%; background: var(--primary); width: 0%; transition: 0.3s; }
+        .toggle-btn { width: 100%; margin-bottom: 10px; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -75,7 +80,7 @@
         </div>
         <div class="form-group">
             <label>要尋找的關鍵字 (多個請用半形逗號 , 隔開)</label>
-            <input type="text" id="keywords" placeholder="例如：特定姓名,身分證號,公司名稱" value="">
+            <input type="text" id="keywords" placeholder="例如：姓名,身分證號,公司名稱" value="">
         </div>
         <div class="form-group">
             <label>遮蔽方式</label>
@@ -180,8 +185,9 @@
         progressBar.style.display = 'block';
         gallery.innerHTML = '';
         processedImages = [];
+        downloadZipBtn.style.display = 'none';
 
-        statusText.innerText = '正在初始化 AI 文字辨識引擎 (首次載入語言包需較長時間)...';
+        statusText.innerText = '正在初始化 AI 文字辨識引擎... (如果是第一次，下載語言包會需要幾十秒鐘)';
         
         try {
             const worker = await Tesseract.createWorker(lang);
@@ -191,7 +197,7 @@
                 statusText.innerText = `正在處理第 ${i + 1} / ${uploadedFiles.length} 張圖片...`;
                 progressFill.style.width = `${((i) / uploadedFiles.length) * 100}%`;
 
-                // 讀取圖片到 Canvas
+                // 準備 Canvas
                 const img = await createImageBitmap(file);
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
@@ -199,50 +205,47 @@
                 canvas.height = img.height;
                 ctx.drawImage(img, 0, 0);
 
+                // 保留原圖 URL 供對比使用
+                const originalDataUrl = URL.createObjectURL(file);
+
                 // 進行 OCR 辨識
                 const { data } = await worker.recognize(canvas);
-
-                // 💡 可以在瀏覽器 Console (F12) 看到 AI 實際辨識出的文字
-                console.log(`=== 第 ${i+1} 張圖辨識結果 ===`);
-                console.log(data.text);
+                const rawOCRText = data.text; // 儲存原始辨識結果供除錯顯示
+                let matchCount = 0; // 紀錄匹配成功次數
                 
-                // 改用 lines 和 symbols 來做精準匹配，解決中文斷詞與空白問題
+                // 開始比對
                 data.lines.forEach(line => {
                     const symbols = line.symbols;
                     if (!symbols || symbols.length === 0) return;
 
-                    // 建立一個「完全沒有空白」的純文字字串，並記下每個字的座標
                     let lineText = "";
                     let validSymbols = [];
                     symbols.forEach(sym => {
-                        const char = sym.text.replace(/\s+/g, ''); // 濾掉所有空白
+                        const char = sym.text.replace(/\s+/g, '');
                         if (char) {
                             lineText += char;
                             validSymbols.push(sym);
                         }
                     });
 
-                    // 開始比對關鍵字
                     keywords.forEach(kw => {
                         const cleanKw = kw.replace(/\s+/g, '');
                         if (!cleanKw) return;
 
                         let startIndex = lineText.indexOf(cleanKw);
-                        // 如果有找到，且可能會出現多次，用 while 迴圈抓出來
                         while (startIndex !== -1) {
                             let endIndex = startIndex + cleanKw.length - 1;
-
-                            // 取得這個關鍵字「開頭」與「結尾」的座標，把它框起來
                             const startSym = validSymbols[startIndex];
                             const endSym = validSymbols[endIndex];
 
                             if (startSym && endSym) {
+                                matchCount++; // 成功找到一個！計數 + 1
+
                                 let x0 = Math.max(0, startSym.bbox.x0 - padding);
                                 let y0 = Math.max(0, Math.min(startSym.bbox.y0, endSym.bbox.y0) - padding);
                                 let w = Math.min(canvas.width - x0, endSym.bbox.x1 - startSym.bbox.x0 + padding * 2);
                                 let h = Math.min(canvas.height - y0, Math.max(startSym.bbox.y1, endSym.bbox.y1) - Math.min(startSym.bbox.y0, endSym.bbox.y0) + padding * 2);
 
-                                // 決定背景色
                                 let bgColor = '#000000'; 
                                 if (maskType === 'color' || maskType === 'replace') {
                                     const pixelData = ctx.getImageData(Math.max(0, x0 - 2), Math.max(0, y0 - 2), 1, 1).data;
@@ -251,11 +254,9 @@
                                     bgColor = '#000000';
                                 }
 
-                                // 畫色塊
                                 ctx.fillStyle = bgColor;
                                 ctx.fillRect(x0, y0, w, h);
 
-                                // 如果是替換文字，把字寫上去
                                 if (maskType === 'replace') {
                                     ctx.fillStyle = getContrastYIQ(bgColor);
                                     ctx.font = `bold ${h * 0.8}px Arial`;
@@ -264,43 +265,83 @@
                                     ctx.fillText(replaceText, x0 + w / 2, y0 + h / 2);
                                 }
                             }
-                            // 繼續往後找同一行有沒有第二個一樣的字
                             startIndex = lineText.indexOf(cleanKw, startIndex + 1);
                         }
                     });
                 });
 
-                // 顯示到畫廊
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-                processedImages.push({ name: `processed_${file.name}`, data: dataUrl });
-                renderCard(dataUrl, `processed_${file.name}`);
+                // 產生處理後的圖片 URL
+                const processedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+                processedImages.push({ name: `processed_${file.name}`, data: processedDataUrl });
+                
+                // 渲染包含對比功能與除錯資訊的卡片
+                renderCard(originalDataUrl, processedDataUrl, `processed_${file.name}`, matchCount, rawOCRText);
             }
 
             await worker.terminate();
             progressFill.style.width = '100%';
-            statusText.innerText = '處理完成！';
+            statusText.innerText = '🎉 所有圖片處理完成！';
             downloadZipBtn.style.display = 'inline-block';
 
         } catch (error) {
-            statusText.innerText = '處理發生錯誤：' + error.message;
+            statusText.innerText = '❌ 處理發生錯誤：' + error.message;
             console.error(error);
         } finally {
             processBtn.disabled = false;
         }
     });
 
-    // 渲染圖片卡片
-    function renderCard(dataUrl, filename) {
+    // 渲染圖片卡片 (包含切換預覽與除錯資訊)
+    function renderCard(originalUrl, processedUrl, filename, matchCount, rawText) {
         const div = document.createElement('div');
         div.className = 'img-card';
+        
+        const badgeClass = matchCount > 0 ? 'badge success' : 'badge';
+        const badgeText = matchCount > 0 ? `成功遮蔽 ${matchCount} 處` : `未找到關鍵字`;
+
         div.innerHTML = `
-            <img src="${dataUrl}" style="max-width:100%; border-radius:4px; margin-bottom:10px;">
-            <a href="${dataUrl}" download="${filename}" style="display:block; text-align:center; background:var(--primary); color:#fff; text-decoration:none; padding:8px; border-radius:4px;">單張下載</a>
+            <div style="margin-bottom: 10px; font-weight: bold; font-size: 16px;">
+                📄 ${filename.replace('processed_', '')} 
+                <span class="${badgeClass}">${badgeText}</span>
+            </div>
+            
+            <button class="toggle-btn" onclick="toggleImage(this)">🛡️ 目前顯示：處理後的圖片 (點擊可切換看原圖)</button>
+            
+            <div class="img-container">
+                <img src="${processedUrl}" class="img-processed">
+                <img src="${originalUrl}" class="img-original" style="display:none; border: 2px solid #ff4757;">
+            </div>
+
+            <a href="${processedUrl}" download="${filename}" style="display:block; text-align:center; background:#2ed573; color:#fff; text-decoration:none; padding:10px; border-radius:6px; font-weight:bold; margin-bottom:10px;">💾 單張下載處理後的圖片</a>
+            
+            <details>
+                <summary style="cursor: pointer; color: #666; font-size: 14px;">🔍 點我看 AI 實際辨識到的「所有文字」 (用來抓錯字)</summary>
+                <div class="raw-text-box">${rawText || "沒有辨識出任何文字"}</div>
+            </details>
         `;
         gallery.appendChild(div);
     }
 
-    // 計算對比色 (用來決定文字該用白還是黑)
+    // 切換圖片顯示的腳本
+    function toggleImage(btn) {
+        const container = btn.nextElementSibling;
+        const imgProcessed = container.querySelector('.img-processed');
+        const imgOriginal = container.querySelector('.img-original');
+        
+        if (imgProcessed.style.display !== 'none') {
+            imgProcessed.style.display = 'none';
+            imgOriginal.style.display = 'block';
+            btn.innerText = '👀 目前顯示：原始圖片 (點擊切換看處理結果)';
+            btn.style.background = '#ff4757';
+        } else {
+            imgProcessed.style.display = 'block';
+            imgOriginal.style.display = 'none';
+            btn.innerText = '🛡️ 目前顯示：處理後的圖片 (點擊可切換看原圖)';
+            btn.style.background = 'var(--primary)';
+        }
+    }
+
+    // 計算對比色
     function getContrastYIQ(rgbStr){
         const rgb = rgbStr.match(/\d+/g);
         if(!rgb) return '#000';
