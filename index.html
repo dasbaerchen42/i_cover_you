@@ -200,10 +200,9 @@
                 ctx.drawImage(img, 0, 0);
 
                 // 進行 OCR 辨識
-// 進行 OCR 辨識
                 const { data } = await worker.recognize(canvas);
 
-                // 💡 新增除錯功能：把 AI 實際看到的字印在瀏覽器控制台
+                // 💡 可以在瀏覽器 Console (F12) 看到 AI 實際辨識出的文字
                 console.log(`=== 第 ${i+1} 張圖辨識結果 ===`);
                 console.log(data.text);
                 
@@ -248,6 +247,8 @@
                                 if (maskType === 'color' || maskType === 'replace') {
                                     const pixelData = ctx.getImageData(Math.max(0, x0 - 2), Math.max(0, y0 - 2), 1, 1).data;
                                     bgColor = `rgb(${pixelData[0]}, ${pixelData[1]}, ${pixelData[2]})`;
+                                } else if (maskType === 'black') {
+                                    bgColor = '#000000';
                                 }
 
                                 // 畫色塊
@@ -267,34 +268,6 @@
                             startIndex = lineText.indexOf(cleanKw, startIndex + 1);
                         }
                     });
-            
-                        // 加入 Padding
-                        x0 = Math.max(0, x0 - padding);
-                        y0 = Math.max(0, y0 - padding);
-                        const w = Math.min(canvas.width - x0, x1 - x0 + padding * 2);
-                        const h = Math.min(canvas.height - y0, y1 - y0 + padding * 2);
-
-                        // 決定背景色
-                        let bgColor = '#000000'; // 預設黑
-                        if (maskType === 'color' || maskType === 'replace') {
-                            // 抓取邊緣顏色作為底色 (簡單取左上角往外一點的像素)
-                            const pixelData = ctx.getImageData(Math.max(0, x0 - 2), Math.max(0, y0 - 2), 1, 1).data;
-                            bgColor = `rgb(${pixelData[0]}, ${pixelData[1]}, ${pixelData[2]})`;
-                        }
-
-                        // 畫色塊
-                        ctx.fillStyle = bgColor;
-                        ctx.fillRect(x0, y0, w, h);
-
-                        // 如果是替換文字，把字寫上去
-                        if (maskType === 'replace') {
-                            ctx.fillStyle = getContrastYIQ(bgColor); // 計算文字顏色要深還淺
-                            ctx.font = `bold ${h * 0.8}px Arial`;
-                            ctx.textAlign = 'center';
-                            ctx.textBaseline = 'middle';
-                            ctx.fillText(replaceText, x0 + w / 2, y0 + h / 2);
-                        }
-                    }
                 });
 
                 // 顯示到畫廊
